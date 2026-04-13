@@ -81,6 +81,28 @@ body {
   margin-bottom: 20px;
 }
 
+.chat-message {
+  margin-bottom: 14px;
+}
+
+.chat-message.user p {
+  background: #000;
+  color: #fff;
+  padding: 14px;
+  border-radius: 12px;
+  display: inline-block;
+  max-width: 100%;
+}
+
+.chat-message.assistant p {
+  background: #e8e8e8;
+  color: #111;
+  padding: 14px;
+  border-radius: 12px;
+  display: inline-block;
+  max-width: 100%;
+}
+
 /* placeholder message */
 .placeholder-message {
   width: 100%;
@@ -195,7 +217,7 @@ body {
   flex-shrink: 0;
 }
 
-.product-card .product-info {
+..product-card .product-info {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -211,6 +233,66 @@ body {
 .product-card p {
   font-size: 14px;
   color: #666;
+}
+
+.product-card .toggle-description {
+  margin-top: 12px;
+  width: fit-content;
+  border: none;
+  background: #000;
+  color: #fff;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.3s;
+}
+
+.product-card .toggle-description:hover,
+.product-card .toggle-description:focus {
+  background: #333;
+}
+
+.product-card .product-description {
+  display: none;
+  margin-top: 12px;
+  color: #444;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.product-card.show-description .product-description {
+  display: block;
+}
+
+.product-card.selected {
+  border-color: #000;
+  background: #fffaf0;
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.1);
+}
+
+.selected-product-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.remove-selected {
+  border: 1px solid #000;
+  background: #000;
+  color: #fff;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.remove-selected:hover {
+  background: #333;
 }
 
 /* selected products */
@@ -230,6 +312,26 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.selected-actions {
+  margin: 18px 0 0;
+}
+
+.secondary-btn {
+  border: 1px solid #000;
+  background: transparent;
+  color: #000;
+  padding: 12px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.secondary-btn:hover,
+.secondary-btn:focus {
+  background: #000;
+  color: #fff;
 }
 
 .generate-btn {

@@ -1,8 +1,26 @@
 /* Get references to DOM elements */
 const categoryFilter = document.getElementById("categoryFilter");
 const productsContainer = document.getElementById("productsContainer");
+const selectedProductsList = document.getElementById("selectedProductsList");
+const generateRoutineBtn = document.getElementById("generateRoutine");
 const chatForm = document.getElementById("chatForm");
 const chatWindow = document.getElementById("chatWindow");
+
+let allProducts = [];
+let currentProducts = [];
+let selectedProducts = [];
+const expandedProductIds = new Set();
+let chatMessages = [];
+
+const WORKER_ENDPOINT_URL =
+  typeof WORKER_ENDPOINT_URL !== "undefined" ? WORKER_ENDPOINT_URL : "";
+const STORAGE_KEY = "loreal-selected-product-ids";
+const clearSelectedButton = document.getElementById("clearSelectedProducts");
+const systemMessage = {
+  role: "system",
+  content:
+    "You are a friendly beauty routine expert. Answer only about the generated routine or related topics such as skincare, haircare, makeup, fragrance, and product care. Use the full chat history to make your responses relevant and consistent. If the user asks about unrelated topics, gently steer them back to the product routine or related beauty guidance.",
+};
 
 /* Show initial placeholder until user selects a category */
 productsContainer.innerHTML = `
@@ -13,45 +31,361 @@ productsContainer.innerHTML = `
 
 /* Load product data from JSON file */
 async function loadProducts() {
+  if (allProducts.length > 0) {
+    return allProducts;
+  }
+
   const response = await fetch("products.json");
   const data = await response.json();
-  return data.products;
+  allProducts = data.products;
+  return allProducts;
 }
 
-/* Create HTML for displaying product cards */
+function isProductSelected(productId) {
+  return selectedProducts.some((product) => product.id === productId);
+}
+
+function isDescriptionExpanded(productId) {
+  return expandedProductIds.has(productId);
+}
+
+function getSavedProductIds() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    return saved ? JSON.parse(saved) : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function saveSelectedProducts() {
+  const selectedIds = selectedProducts.map((product) => product.id);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(selectedIds));
+}
+
+function restoreSavedProducts() {
+  const savedIds = getSavedProductIds();
+  if (!savedIds.length || !allProducts.length) {
+    return;
+  }
+
+  selectedProducts = allProducts.filter((product) =>
+    savedIds.includes(product.id),
+  );
+}
+
+function updateClearButton() {
+  if (!clearSelectedButton) return;
+  clearSelectedButton.style.display = selectedProducts.length
+    ? "inline-flex"
+    : "none";
+}
+
+function clearAllSelectedProducts() {
+  selectedProducts = [];
+  saveSelectedProducts();
+  updateSelectedProducts();
+  displayProducts(currentProducts);
+}
+
 function displayProducts(products) {
-  productsContainer.innerHTML = products
-    .map(
-      (product) => `
-    <div class="product-card">
-      <img src="${product.image}" alt="${product.name}">
-      <div class="product-info">
-        <h3>${product.name}</h3>
-        <p>${product.brand}</p>
+  currentProducts = products;
+
+  if (products.length === 0) {
+    productsContainer.innerHTML = `
+      <div class="placeholder-message">
+        No products found for this category.
       </div>
-    </div>
-  `
-    )
+    `;
+    return;
+  }
+
+  productsContainer.innerHTML = products
+    .map((product) => {
+      const selectedClass = isProductSelected(product.id) ? "selected" : "";
+      const descriptionClass = isDescriptionExpanded(product.id)
+        ? "show-description"
+        : "";
+      const buttonLabel = isDescriptionExpanded(product.id)
+        ? "Hide description"
+        : "View description";
+
+      return `
+        <div class="product-card ${selectedClass} ${descriptionClass}" data-product-id="${product.id}">
+          <img src="${product.image}" alt="${product.name}">
+          <div class="product-info">
+            <h3>${product.name}</h3>
+            <p>${product.brand}</p>
+            <button type="button" class="toggle-description" data-product-id="${product.id}" aria-expanded="${isDescriptionExpanded(product.id)}">
+              ${buttonLabel}
+            </button>
+            <p class="product-description">${product.description}</p>
+          </div>
+        </div>
+      `;
+    })
     .join("");
 }
 
-/* Filter and display products when category changes */
+function appendChatMessage(role, message) {
+  const messageElement = document.createElement("div");
+  messageElement.className = `chat-message ${role}`;
+  messageElement.innerHTML = `<p>${message}</p>`;
+  chatWindow.appendChild(messageElement);
+  chatWindow.scrollTop = chatWindow.scrollHeight;
+}
+
+function updateChatWindow() {
+  chatWindow.innerHTML = "";
+  chatMessages.forEach((message) => {
+    const messageElement = document.createElement("div");
+    messageElement.className = `chat-message ${message.role}`;
+    messageElement.innerHTML = `<p>${message.content}</p>`;
+    chatWindow.appendChild(messageElement);
+  });
+  chatWindow.scrollTop = chatWindow.scrollHeight;
+}
+
+function getSelectedProductData() {
+  return selectedProducts.map((product) => ({
+    name: product.name,
+    brand: product.brand,
+    category: product.category,
+    description: product.description,
+  }));
+}
+
+function getRoutinePrompt() {
+  const selectedProductData = getSelectedProductData();
+  return `Create a personalized beauty routine using only these selected products. Provide a step-by-step routine and explain how each product fits into the user's routine. Keep the response focused on skincare, haircare, makeup, fragrance, and other related beauty guidance. Here are the selected products:\n\n${JSON.stringify(
+    selectedProductData,
+    null,
+    2,
+  )}`;
+}
+
+async function callOpenAI(messages) {
+  if (!WORKER_ENDPOINT_URL) {
+    throw new Error(
+      "Worker endpoint URL is missing. Add WORKER_ENDPOINT_URL to secrets.js.",
+    );
+  }
+
+  const response = await fetch(WORKER_ENDPOINT_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "gpt-4o",
+      messages,
+      max_tokens: 500,
+      temperature: 0.8,
+    }),
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error?.message || "Worker request failed.");
+  }
+
+  return data.choices?.[0]?.message?.content?.trim() || "";
+}
+
+async function generateRoutine() {
+  if (selectedProducts.length === 0) {
+    appendChatMessage(
+      "assistant",
+      "Please select at least one product before generating a routine.",
+    );
+    return;
+  }
+
+  const userRoutineMessage = {
+    role: "user",
+    content: getRoutinePrompt(),
+  };
+  chatMessages.push(userRoutineMessage);
+  updateChatWindow();
+
+  try {
+    const aiResponse = await callOpenAI([systemMessage, ...chatMessages]);
+    const assistantMessage = {
+      role: "assistant",
+      content: aiResponse,
+    };
+    chatMessages.push(assistantMessage);
+    updateChatWindow();
+  } catch (error) {
+    appendChatMessage(
+      "assistant",
+      `Unable to generate routine: ${error.message}`,
+    );
+  }
+}
+
+function addFollowUpQuestion(question) {
+  if (!question.trim()) return;
+
+  const userMessage = {
+    role: "user",
+    content: question,
+  };
+  chatMessages.push(userMessage);
+  updateChatWindow();
+
+  callOpenAI([systemMessage, ...chatMessages])
+    .then((answer) => {
+      const assistantMessage = {
+        role: "assistant",
+        content: answer,
+      };
+      chatMessages.push(assistantMessage);
+      updateChatWindow();
+    })
+    .catch((error) => {
+      appendChatMessage(
+        "assistant",
+        `Unable to answer follow-up question: ${error.message}`,
+      );
+    });
+}
+
+function updateSelectedProducts() {
+  if (selectedProducts.length === 0) {
+    selectedProductsList.innerHTML = `
+      <div class="placeholder-message">
+        No products selected yet.
+      </div>
+    `;
+    return;
+  }
+
+  selectedProductsList.innerHTML = selectedProducts
+    .map(
+      (product) => `
+        <div class="selected-product-item">
+          <span>
+            <strong>${product.name}</strong> — ${product.brand}
+          </span>
+          <button class="remove-selected" data-product-id="${product.id}">
+            Remove
+          </button>
+        </div>
+      `,
+    )
+    .join("");
+
+  updateClearButton();
+}
+
+function toggleProductSelection(productId) {
+  const product = allProducts.find((item) => item.id === productId);
+  if (!product) {
+    return;
+  }
+
+  const existingIndex = selectedProducts.findIndex(
+    (item) => item.id === productId,
+  );
+
+  if (existingIndex === -1) {
+    selectedProducts.push(product);
+  } else {
+    selectedProducts.splice(existingIndex, 1);
+  }
+
+  saveSelectedProducts();
+  updateSelectedProducts();
+  displayProducts(currentProducts);
+}
+
+function toggleDescription(productId) {
+  if (expandedProductIds.has(productId)) {
+    expandedProductIds.delete(productId);
+  } else {
+    expandedProductIds.add(productId);
+  }
+
+  displayProducts(currentProducts);
+}
+
+productsContainer.addEventListener("click", (event) => {
+  const descriptionButton = event.target.closest(".toggle-description");
+  if (descriptionButton) {
+    const productId = Number(descriptionButton.dataset.productId);
+    if (!productId) {
+      return;
+    }
+
+    toggleDescription(productId);
+    return;
+  }
+
+  const productCard = event.target.closest(".product-card");
+  if (!productCard) {
+    return;
+  }
+
+  const productId = Number(productCard.dataset.productId);
+  if (!productId) {
+    return;
+  }
+
+  toggleProductSelection(productId);
+});
+
+selectedProductsList.addEventListener("click", (event) => {
+  const removeButton = event.target.closest(".remove-selected");
+  if (!removeButton) {
+    return;
+  }
+
+  const productId = Number(removeButton.dataset.productId);
+  if (!productId) {
+    return;
+  }
+
+  toggleProductSelection(productId);
+});
+
 categoryFilter.addEventListener("change", async (e) => {
   const products = await loadProducts();
   const selectedCategory = e.target.value;
 
-  /* filter() creates a new array containing only products 
-     where the category matches what the user selected */
   const filteredProducts = products.filter(
-    (product) => product.category === selectedCategory
+    (product) => product.category === selectedCategory,
   );
 
   displayProducts(filteredProducts);
 });
 
-/* Chat form submission handler - placeholder for OpenAI integration */
+generateRoutineBtn.addEventListener("click", async () => {
+  await generateRoutine();
+});
+
 chatForm.addEventListener("submit", (e) => {
   e.preventDefault();
+  const userInput = document.getElementById("userInput");
+  const question = userInput.value.trim();
+  if (!question) {
+    return;
+  }
 
-  chatWindow.innerHTML = "Connect to the OpenAI API for a response!";
+  addFollowUpQuestion(question);
+  userInput.value = "";
 });
+
+async function init() {
+  await loadProducts();
+  restoreSavedProducts();
+  updateSelectedProducts();
+  updateChatWindow();
+  updateClearButton();
+}
+
+if (clearSelectedButton) {
+  clearSelectedButton.addEventListener("click", clearAllSelectedProducts);
+}
+
+init();
