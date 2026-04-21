@@ -1,5 +1,9 @@
 /* Get references to DOM elements */
 const categoryFilter = document.getElementById("categoryFilter");
+const productSearch = document.getElementById("productSearch");
+const clearSearchBtn = document.getElementById("clearSearchBtn");
+const rtlToggle = document.getElementById("rtlToggle");
+const enableWebSearch = document.getElementById("enableWebSearch");
 const productsContainer = document.getElementById("productsContainer");
 const selectedProductsList = document.getElementById("selectedProductsList");
 const generateRoutineBtn = document.getElementById("generateRoutine");
@@ -9,12 +13,15 @@ const chatWindow = document.getElementById("chatWindow");
 let allProducts = [];
 let currentProducts = [];
 let selectedProducts = [];
+let isRTLMode = false;
 const expandedProductIds = new Set();
 let chatMessages = [];
 
 const WORKER_ENDPOINT_URL =
   typeof WORKER_ENDPOINT_URL !== "undefined" ? WORKER_ENDPOINT_URL : "";
 const STORAGE_KEY = "loreal-selected-product-ids";
+const RTL_STORAGE_KEY = "loreal-rtl-mode";
+const WEB_SEARCH_STORAGE_KEY = "loreal-web-search-enabled";
 const clearSelectedButton = document.getElementById("clearSelectedProducts");
 const systemMessage = {
   role: "system",
@@ -76,9 +83,11 @@ function restoreSavedProducts() {
 
 function updateClearButton() {
   if (!clearSelectedButton) return;
-  clearSelectedButton.style.display = selectedProducts.length
-    ? "inline-flex"
-    : "none";
+  if (selectedProducts.length > 0) {
+    clearSelectedButton.classList.add("show");
+  } else {
+    clearSelectedButton.classList.remove("show");
+  }
 }
 
 function clearAllSelectedProducts() {
@@ -94,7 +103,7 @@ function displayProducts(products) {
   if (products.length === 0) {
     productsContainer.innerHTML = `
       <div class="placeholder-message">
-        No products found for this category.
+        No products found. Try a different category or search term.
       </div>
     `;
     return;
@@ -114,8 +123,10 @@ function displayProducts(products) {
         <div class="product-card ${selectedClass} ${descriptionClass}" data-product-id="${product.id}">
           <img src="${product.image}" alt="${product.name}">
           <div class="product-info">
-            <h3>${product.name}</h3>
-            <p>${product.brand}</p>
+            <div>
+              <h3>${product.name}</h3>
+              <p class="brand">${product.brand}</p>
+            </div>
             <button type="button" class="toggle-description" data-product-id="${product.id}" aria-expanded="${isDescriptionExpanded(product.id)}">
               ${buttonLabel}
             </button>
@@ -181,6 +192,7 @@ async function callOpenAI(messages) {
       messages,
       max_tokens: 500,
       temperature: 0.8,
+      enableWebSearch: enableWebSearch.checked,
     }),
   });
 
@@ -310,27 +322,82 @@ function toggleDescription(productId) {
   displayProducts(currentProducts);
 }
 
-productsContainer.addEventListener("click", (event) => {
-  const descriptionButton = event.target.closest(".toggle-description");
-  if (descriptionButton) {
-    const productId = Number(descriptionButton.dataset.productId);
-    if (!productId) {
-      return;
-    }
+/* Search and filter functionality */
+function filterProducts() {
+  const selectedCategory = categoryFilter.value;
+  const searchTerm = productSearch.value.toLowerCase();
 
-    toggleDescription(productId);
-    return;
+  let filtered = allProducts;
+
+  if (selectedCategory) {
+    filtered = filtered.filter(
+      (product) => product.category === selectedCategory,
+    );
   }
 
-  const productCard = event.target.closest(".product-card");
-  if (!productCard) {
-    return;
+  if (searchTerm) {
+    filtered = filtered.filter(
+      (product) =>
+        product.name.toLowerCase().includes(searchTerm) ||
+        product.brand.toLowerCase().includes(searchTerm) ||
+        product.description.toLowerCase().includes(searchTerm),
+    );
   }
 
-  const productId = Number(productCard.dataset.productId);
-  if (!productId) {
-    return;
+  displayProducts(filtered);
+  updateClearSearchButton();
+}
+
+function updateClearSearchButton() {
+  const hasSearch = productSearch.value.trim() !== "";
+  if (hasSearch) {
+    clearSearchBtn.classList.add("show");
+  } else {
+    clearSearchBtn.classList.remove("show");
   }
+}
+
+function clearSearch() {
+  productSearch.value = "";
+  filterProducts();
+}
+
+/* RTL Support */
+function toggleRTLMode() {
+  isRTLMode = !isRTLMode;
+  localStorage.setItem(RTL_STORAGE_KEY, JSON.stringify(isRTLMode));
+
+  if (isRTLMode) {
+    document.body.classList.add("rtl");
+    rtlToggle.textContent = "🌐 English";
+  } else {
+    document.body.classList.remove("rtl");
+    rtlToggle.innerHTML = '<i class="fa-solid fa-language"></i> العربية';
+  }
+}
+
+function loadRTLPreference() {
+  const saved = localStorage.getItem(RTL_STORAGE_KEY);
+  if (saved && JSON.parse(saved)) {
+    isRTLMode = true;
+    document.body.classList.add("rtl");
+    rtlToggle.textContent = "🌐 English";
+  }
+}
+
+/* Web Search Support */
+function saveWebSearchPreference() {
+  localStorage.setItem(WEB_SEARCH_STORAGE_KEY, JSON.stringify(enableWebSearch.checked));
+}
+
+function loadWebSearchPreference() {
+  const saved = localStorage.getItem(WEB_SEARCH_STORAGE_KEY);
+  if (saved && JSON.parse(saved)) {
+    enableWebSearch.checked = true;
+  }
+}
+
+enableWebSearch.addEventListener("change", saveWebSearchPreference);
 
   toggleProductSelection(productId);
 });
@@ -351,14 +418,12 @@ selectedProductsList.addEventListener("click", (event) => {
 
 categoryFilter.addEventListener("change", async (e) => {
   const products = await loadProducts();
-  const selectedCategory = e.target.value;
-
-  const filteredProducts = products.filter(
-    (product) => product.category === selectedCategory,
-  );
-
-  displayProducts(filteredProducts);
+  filterProducts();
 });
+
+productSearch.addEventListener("input", filterProducts);
+clearSearchBtn.addEventListener("click", clearSearch);
+rtlToggle.addEventListener("click", toggleRTLMode);
 
 generateRoutineBtn.addEventListener("click", async () => {
   await generateRoutine();
@@ -378,6 +443,8 @@ chatForm.addEventListener("submit", (e) => {
 
 async function init() {
   await loadProducts();
+  loadRTLPreference();
+  loadWebSearchPreference();
   restoreSavedProducts();
   updateSelectedProducts();
   updateChatWindow();
